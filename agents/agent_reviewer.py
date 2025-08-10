@@ -1,11 +1,13 @@
 import subprocess, os, re, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from entity.code_quality import CodeQuality
-from langchain_openai import ChatOpenAI
+from utils.gemini_client import query_gemini
+
+
 from langchain_core.prompts import PromptTemplate
 
 # Initialize the OpenAI LLM
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
 
 # Prompt template for generating synthetic test data
 test_prompt = PromptTemplate.from_template("""
@@ -108,13 +110,13 @@ class AgentReviewer:
         """
         try:
             # 1) Use LLM to rewrite the script to use synthetic data
-            test_script = llm.invoke(
-                test_prompt.invoke({
-                    "code": code,
-                    "algorithm_name": algorithm_name,
-                    "package_name": package_name
-                })
-            ).content
+            prompt = test_prompt.format(
+            code=code,
+            algorithm_name=algorithm_name,
+            package_name=package_name
+            )
+            test_script = query_gemini(prompt)
+
             test_script = self._clean_markdown(test_script)
 
             # 2) Save the rewritten script to file

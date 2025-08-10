@@ -4,19 +4,17 @@ import re
 import subprocess
 from typing import Any, Dict, List, Optional
 import sys
+import google.generativeai as genai
+from utils.gemini_client import query_gemini
 
-
-from langchain.prompts import PromptTemplate
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
-from langchain_openai import ChatOpenAI
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from entity.code_quality import CodeQuality
 from config.config import Config
-os.environ['OPENAI_API_KEY'] = Config.OPENAI_API_KEY
+# os.environ['OPENAI_API_KEY'] = Config.OPENAI_API_KEY
+genai.configure(api_key=Config.GEMINI_API_KEY)
 
-SYSTEM_PROMPT_TMPL = PromptTemplate.from_template(
-    """
+SYSTEM_PROMPT_TMPL = """
 You are an expert Python engineer specialising in anomaly‑detection libraries.
 
 Current implementation
@@ -51,7 +49,7 @@ Follow the **ReAct** loop **STRICTLY** – each response must be *Either*:
 IMPORTANT:
 1. Do not input `default` in the parameters, use the default values from the code.
 """
-)
+
 
 
 class AgentOptimizer:
@@ -127,39 +125,51 @@ class AgentOptimizer:
         return pts
     def run(
         self,
-        llm: ChatOpenAI,
         quality: CodeQuality,
         algorithm_doc: str,
         max_steps: int = 8
     ) -> CodeQuality:
+        from utils.gemini_client import query_gemini
         """Run the optimization loop using the given inputs and return CodeQuality."""
         code = quality.code
         parameters = quality.parameters
         std_output = quality.std_output
         algorithm_name = quality.algorithm
-        system_prompt = SYSTEM_PROMPT_TMPL.format(
-            code=code,
-            parameter=parameters,
-            std_output=std_output,
-            algorithm_doc=algorithm_doc,
-        )
-
-        messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
         final_params = parameters 
+        # system_prompt = SYSTEM_PROMPT_TMPL.format(
+        #     code=code,
+        #     parameter=parameters,
+        #     std_output=std_output,
+        #     algorithm_doc=algorithm_doc,
+        # )
+
+        # messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
+       
 
         for step in range(1, max_steps + 1):
-            ai_response: AIMessage = llm.invoke(messages)  # type: ignore[arg-type]
-            messages.append(ai_response)
+            # ai_response: AIMessage = llm.invoke(messages)  # type: ignore[arg-type]
 
-            content = ai_response.content or ""
+            # messages.append(ai_response)
+
+            # content = ai_response.content or ""
+            prompt = SYSTEM_PROMPT_TMPL.format(
+            code=code,
+            parameter=final_params,
+            std_output=std_output,
+            algorithm_doc=algorithm_doc,
+            )
+            content = query_gemini(prompt)
+            # response = query_gemini(system_prompt)
+            # messages.append(response)
+            # content = response
+
             self._print_thought_and_action(content, step)
 
             param_dict = self._extract_param_dict(content)
             if param_dict:
                 final_params = param_dict 
             else:
-                messages.append(HumanMessage(
-                    content="Action line not detected. Please choose parameters and call the tool as instructed."))
+                print("[Agent] No parameter change detected. Asking again...")
                 continue
 
             if "Final:" in content:
@@ -167,7 +177,8 @@ class AgentOptimizer:
 
             observation = self.execute_code(param_dict, code, algorithm_name)
             print(observation)
-            messages.append(HumanMessage(content=f"Observation: {observation[:4000]}"))
+            std_output = observation
+            # messages.append(HumanMessage(content=f"Observation: {observation[:4000]}"))
 
         final_output = self.execute_code(final_params, code, algorithm_name)
 
@@ -244,7 +255,7 @@ for i, (pred, true_label) in enumerate(zip(predictions, y_test)):
             "algorithm_name": "ABOD",
         }
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+   
 
     agent = AgentOptimizer()
     input_quality = CodeQuality(
@@ -258,9 +269,10 @@ for i, (pred, true_label) in enumerate(zip(predictions, y_test)):
         error_points=[],
         review_count=0
     )
-    final_answer = agent.run(llm=llm,
-        quality=input_quality,
-        algorithm_doc=demo["algorithm_doc"],
-        max_steps=8
+    final_answer = agent.run(
+    quality=input_quality,
+    algorithm_doc=demo["algorithm_doc"],
+    max_steps=8
     )
+
     print("\n=== Final Answer ===\n", final_answer.parameters)

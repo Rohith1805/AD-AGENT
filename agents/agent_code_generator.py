@@ -1,4 +1,4 @@
-from langchain_openai import ChatOpenAI
+import google.generativeai as genai
 from langchain_core.prompts import PromptTemplate
 import re
 import sys
@@ -9,10 +9,10 @@ import subprocess
 from datetime import datetime, timedelta
 import ast
 from config.config import Config
-os.environ['OPENAI_API_KEY'] = Config.OPENAI_API_KEY
+genai.configure(api_key=Config.GEMINI_API_KEY)
 
 # Initialize OpenAI LLM
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+from utils.gemini_client import query_gemini
 
 template_pyod_labeled = PromptTemplate.from_template("""
 You are an expert Python developer with deep experience in anomaly detection libraries. Your task is to:
@@ -382,27 +382,29 @@ class AgentCodeGenerator:
             tpl = template_tslib_labeled 
         else:
             tpl = template_darts_labeled if data_path_test else template_darts_unlabeled
-        raw = llm.invoke(
-            tpl.invoke({
-                "algorithm": algorithm,
-                "data_path_train": data_path_train,
-                "data_path_test": data_path_test,
-                "algorithm_doc": algorithm_doc,
-                "parameters": str(input_parameters)
-            })
-        ).content
+        prompt = tpl.invoke({
+    "algorithm": algorithm,
+    "data_path_train": data_path_train,
+    "data_path_test": data_path_test,
+    "algorithm_doc": algorithm_doc,
+    "parameters": str(input_parameters)
+          }).to_string()
+
+        raw = query_gemini(prompt)
+        
         return self._clean(raw)
 
     # -------- revision (moved from old Reviewer) --------
     def revise_code(self, code_quality: CodeQuality, algorithm_doc: str) -> str:
-        fixed = llm.invoke(
-            template_fix.invoke({
-                "code": code_quality.code,
-                "error_message": code_quality.error_message,
-                "algorithm": code_quality.algorithm,
-                "algorithm_doc": algorithm_doc
-            })
-        ).content
+        prompt = template_fix.invoke({
+    "code": code_quality.code,
+    "error_message": code_quality.error_message,
+    "algorithm": code_quality.algorithm,
+    "algorithm_doc": algorithm_doc
+        }).to_string()
+
+        fixed = query_gemini(prompt)
+
         # increase review counter here
         code_quality.review_count += 1
         return self._clean(fixed)
@@ -453,6 +455,6 @@ if __name__ == "__main__":
       algorithm_doc=algorithm_doc,
       input_parameters=user_input["parameters"],
       package_name=agentSelector.package_name
-  )
+    )
 
   print(code)

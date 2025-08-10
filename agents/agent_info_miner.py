@@ -2,12 +2,15 @@ from langchain_core.prompts import PromptTemplate
 from datetime import datetime, timedelta
 import json
 from filelock import FileLock
-from openai import OpenAI
+import google.generativeai as genai
+from utils.gemini_client import query_gemini  # Assuming you already wrote this
+import time
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config.config import Config
-os.environ['OPENAI_API_KEY'] = Config.OPENAI_API_KEY
+genai.configure(api_key=Config.GEMINI_API_KEY)
+
 
 web_search_prompt_pyod = PromptTemplate.from_template("""
    You are a machine learning expert and will assist me with researching a specific use of a deep learning model in PyOD. Here is the official document you should refer to: https://pyod.readthedocs.io/en/latest/pyod.models.html
@@ -104,43 +107,38 @@ python -u run.py \
 class AgentInfoMiner:
     def __init__(self):
         pass
-
-    def query_docs(self, algorithm, vectorstore, package_name,cache_path = "cache.json"):
-        """Searches for relevant documentation with caching, expiration, and thread-safe cache writes."""
+    def query_docs(self, algorithm, vectorstore, package_name, cache_path="cache.json"):
+        """Search for relevant documentation using Gemini, with vectorstore fallback and caching."""
 
         lock_path = cache_path + ".lock"
         lock = FileLock(lock_path)
 
-        # Step 1: Ensure cache file exists
+    # Ensure cache file exists
         if not os.path.exists(cache_path):
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump({}, f)
 
-        # Step 2: Use lock to safely read and write to cache
+    # Step 1: Try cache first
         with lock:
-            # Load cache
             with open(cache_path, "r", encoding="utf-8") as f:
                 try:
                     cache = json.load(f)
                 except json.JSONDecodeError:
-                    print("[Cache Error] cache.json is corrupted. Reinitializing...")
+                    print("[Cache Error] cache.json corrupted, resetting...")
                     cache = {}
 
-            # Check cache entry
             if algorithm in cache:
                 try:
                     cached_time = datetime.fromisoformat(cache[algorithm]["query_datetime"])
                     if datetime.now() - cached_time < timedelta(days=7):
-                        print(f"[Cache Hit] Using recent cache for {algorithm}")
-                        print(cache[algorithm]["document"])
+                        print(f"[Cache Hit] Using cached docs for {algorithm}")
                         return cache[algorithm]["document"]
                     else:
                         print(f"[Cache Expired] Re-querying {algorithm}")
                 except Exception:
                     print(f"[Cache Warning] Datetime parse error for {algorithm}, re-querying.")
 
-        # Step 3: Run actual query outside lock (non-blocking for others)
-        client = OpenAI()
+    # Step 2: Build prompt
         match package_name:
             case "pyod":
                 prompt_temp = web_search_prompt_pyod
@@ -151,39 +149,37 @@ class AgentInfoMiner:
             case _:
                 prompt_temp = web_search_prompt_darts
 
-        
         prompt = prompt_temp.invoke({"algorithm_name": algorithm}).to_string()
         if package_name == "darts":
-            prompt = prompt + "\n\n" + web_dict.get(algorithm, "")
-        
-        response = client.responses.create(
-            model="gpt-4o",
-            tools=[{"type": "web_search_preview"}],
-            input=prompt,
-            max_output_tokens=2024
-        )
-        algorithm_doc = response.output_text
-        
+            prompt += "\n\n" + web_dict.get(algorithm, "No official URL found.")
 
-        # Query using RAG
-        #query = ""
-        #if package_name == "pyod":
-        #    query = f"class pyod.models.{algorithm}.{algorithm}"
-        #else:
-        #    query = f"class pygod.detector.{algorithm}"
-        #doc_list = vectorstore.similarity_search(query, k=3)
-        #algorithm_doc = "\n\n".join([doc.page_content for doc in doc_list])
+    # Step 3: Try Gemini (with retry)
+        algorithm_doc = None
+        for attempt in range(2):
+            try:
+                algorithm_doc = query_gemini(prompt)
+                if algorithm_doc:
+                    break
+            except Exception as e:
+                print(f"[Gemini Error Attempt {attempt+1}] {e}")
+            time.sleep(1)
 
-        # if package_name == "tslib":
-        #     algorithm_doc = ''
+    # Step 4: Fallback to vectorstore if Gemini failed
+        if not algorithm_doc and vectorstore:
+            print(f"[Fallback] Using vectorstore for {algorithm}")
+            if package_name == "pyod":
+                query = f"class pyod.models.{algorithm}.{algorithm}"
+            else:
+                query = f"class pygod.detector.{algorithm}"
+            doc_list = vectorstore.similarity_search(query, k=3)
+            algorithm_doc = "\n\n".join([doc.page_content for doc in doc_list])
 
+    # Step 5: Final safeguard
         if not algorithm_doc:
-            print("Error in response for " + algorithm)
-            print(response)
-            return ""
-        print(algorithm_doc)
+            print(f"[Warning] No documentation found for {algorithm}")
+            algorithm_doc = "No documentation found."
 
-        # Step 4: Re-lock and write updated cache
+    # Step 6: Update cache
         with lock:
             with open(cache_path, "r", encoding="utf-8") as f:
                 try:
@@ -192,15 +188,105 @@ class AgentInfoMiner:
                     cache = {}
 
             cache[algorithm] = {
-                "query_datetime": datetime.now().isoformat(),
-                "document": algorithm_doc
+            "query_datetime": datetime.now().isoformat(),
+            "document": algorithm_doc
             }
-
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump(cache, f, ensure_ascii=False, indent=2)
 
-        print(f"[Cache Updated] Stored new documentation for {algorithm}")
+        print(f"[Cache Updated] Stored docs for {algorithm}")
         return algorithm_doc
+
+    # def query_docs(self, algorithm, vectorstore, package_name,cache_path = "cache.json"):
+    #     """Searches for relevant documentation with caching, expiration, and thread-safe cache writes."""
+
+    #     lock_path = cache_path + ".lock"
+    #     lock = FileLock(lock_path)
+
+    #     # Step 1: Ensure cache file exists
+    #     if not os.path.exists(cache_path):
+    #         with open(cache_path, "w", encoding="utf-8") as f:
+    #             json.dump({}, f)
+
+    #     # Step 2: Use lock to safely read and write to cache
+    #     with lock:
+    #         # Load cache
+    #         with open(cache_path, "r", encoding="utf-8") as f:
+    #             try:
+    #                 cache = json.load(f)
+    #             except json.JSONDecodeError:
+    #                 print("[Cache Error] cache.json is corrupted. Reinitializing...")
+    #                 cache = {}
+
+    #         # Check cache entry
+    #         if algorithm in cache:
+    #             try:
+    #                 cached_time = datetime.fromisoformat(cache[algorithm]["query_datetime"])
+    #                 if datetime.now() - cached_time < timedelta(days=7):
+    #                     print(f"[Cache Hit] Using recent cache for {algorithm}")
+    #                     print(cache[algorithm]["document"])
+    #                     return cache[algorithm]["document"]
+    #                 else:
+    #                     print(f"[Cache Expired] Re-querying {algorithm}")
+    #             except Exception:
+    #                 print(f"[Cache Warning] Datetime parse error for {algorithm}, re-querying.")
+
+    #     # Step 3: Run actual query outside lock (non-blocking for others)
+    #     match package_name:
+    #         case "pyod":
+    #             prompt_temp = web_search_prompt_pyod
+    #         case "pygod":
+    #             prompt_temp = web_search_prompt_pygod
+    #         case "tslib":
+    #             prompt_temp = web_search_prompt_tslib
+    #         case _:
+    #             prompt_temp = web_search_prompt_darts
+
+        
+    #     prompt = prompt_temp.invoke({"algorithm_name": algorithm}).to_string()
+    #     if package_name == "darts":
+    #         prompt = prompt + "\n\n" + web_dict.get(algorithm, "No official URL found.")
+
+    #     algorithm_doc = query_gemini(prompt)
+
+        
+
+    #     # Query using RAG
+    #     #query = ""
+    #     #if package_name == "pyod":
+    #     #    query = f"class pyod.models.{algorithm}.{algorithm}"
+    #     #else:
+    #     #    query = f"class pygod.detector.{algorithm}"
+    #     #doc_list = vectorstore.similarity_search(query, k=3)
+    #     #algorithm_doc = "\n\n".join([doc.page_content for doc in doc_list])
+
+    #     # if package_name == "tslib":
+    #     #     algorithm_doc = ''
+
+    #     if not algorithm_doc:
+    #         print("Error in response for " + algorithm)
+    #         # print(response)
+    #         return ""
+    #     print(algorithm_doc)
+
+    #     # Step 4: Re-lock and write updated cache
+    #     with lock:
+    #         with open(cache_path, "r", encoding="utf-8") as f:
+    #             try:
+    #                 cache = json.load(f)
+    #             except json.JSONDecodeError:
+    #                 cache = {}
+
+    #         cache[algorithm] = {
+    #             "query_datetime": datetime.now().isoformat(),
+    #             "document": algorithm_doc
+    #         }
+
+    #         with open(cache_path, "w", encoding="utf-8") as f:
+    #             json.dump(cache, f, ensure_ascii=False, indent=2)
+
+    #     print(f"[Cache Updated] Stored new documentation for {algorithm}")
+    #     return algorithm_doc
 
 if __name__ == "__main__":
     agent = AgentInfoMiner()

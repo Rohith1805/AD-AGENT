@@ -1,24 +1,28 @@
 import logging, sys, operator, asyncio, os
 from typing import TypedDict, Annotated, Sequence, List, Tuple, Any
 
+import google.generativeai as genai  # ✅ ADD THIS LINE
+
 from config.config import Config
-os.environ["OPENAI_API_KEY"] = Config.OPENAI_API_KEY
+genai.configure(api_key=Config.GEMINI_API_KEY)
+
 logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
 
 # ========== langgraph ==========
 from langchain_core.messages import BaseMessage
 from langgraph.graph import StateGraph, END
-from langchain_openai          import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+
 
 # ========== business agents ==========
 from agents.agent_processor import AgentProcessor
-from agents.agent_selector     import AgentSelector
-from agents.agent_info_miner    import AgentInfoMiner
-from agents.agent_code_generator        import AgentCodeGenerator
-from agents.agent_reviewer     import AgentReviewer
-from agents.agent_evaluator    import AgentEvaluator
-from agents.agent_optimizer    import AgentOptimizer        # ★ new
-from entity.code_quality       import CodeQuality
+from agents.agent_selector import AgentSelector
+from agents.agent_info_miner import AgentInfoMiner
+from agents.agent_code_generator import AgentCodeGenerator
+from agents.agent_reviewer import AgentReviewer
+from agents.agent_evaluator import AgentEvaluator
+from agents.agent_optimizer import AgentOptimizer        # ★ new
+from entity.code_quality import CodeQuality
 
 # ------------------------------------------------------------------
 # Full state
@@ -140,13 +144,29 @@ def call_reviewer_for_single_tool(state: FullToolState) -> dict:
 # Node: Decider  (branch: rerun | evaluate)
 # ------------------------------------------------------------------
 
-def decide_next(state: FullToolState) -> dict:
-    cq = state["code_quality"]
-    need_rerun = bool(cq.error_message) and cq.review_count < 2
-    return {"route": "code_generator" if need_rerun else "evaluator"}
+# def decide_next(state: FullToolState) -> dict:
+#     cq = state["code_quality"]
+#     need_rerun = bool(cq.error_message) and cq.review_count < 2
+#     return {"route": "code_generator" if need_rerun else "evaluator"}
 
+# def route_selector(state: FullToolState):
+#     cq = state["code_quality"]
+#     if cq is None:
+#         return "evaluator"
+#     need_rerun = bool(cq.error_message) and cq.review_count < 2
+#     return {"route": "code_generator" if need_rerun else "evaluator"}
+
+#     # return state["route"]
 def route_selector(state: FullToolState):
-    return state["route"]
+    cq = state["code_quality"]
+    if cq is None:
+        return "evaluator"  # default path
+    need_rerun = bool(cq.error_message) and cq.review_count < 2
+    return "code_generator" if need_rerun else "evaluator"
+
+def decide_next(state: FullToolState) -> dict:
+    """Wrapper so other functions still get {'route': ...}."""
+    return {"route": route_selector(state)}
 
 # ------------------------------------------------------------------
 # Node: Evaluator  (real‑data execution & metrics)
@@ -181,7 +201,8 @@ def call_optimizer_for_single_tool(state: FullToolState) -> dict:
         return {"code_quality": cq}
 
     print(f"\n=== [Optimizer] Parameter tuning for {state['current_tool']} ===")
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0)
+
     tuned_cq = optimizer.run(llm=llm,
                              quality=cq,
                              algorithm_doc=doc,

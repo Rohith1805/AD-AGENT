@@ -1,9 +1,11 @@
-import openai
+# utils/openai_client.py
 
-def query_openai(messages, model="gpt-4o"):
-    client = openai.OpenAI()
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages
-    )
-    return response.choices[0].message.content
+import google.generativeai as genai
+from config.config import Config
+
+genai.configure(api_key=Config.GEMINI_API_KEY)
+
+def query_openai(messages, model="gemini-pro"):
+    prompt = "\n".join([msg["content"] for msg in messages if msg["role"] == "user"])
+    response = genai.GenerativeModel(model).generate_content(prompt)
+    return response.text

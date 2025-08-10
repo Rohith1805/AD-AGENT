@@ -10,8 +10,8 @@ AgentProcessor - Using Few-shot Chain-of-Thought (CoT) Extraction
 import os
 import re
 import json
-import openai
-
+import google.generativeai as genai
+from utils.gemini_client import query_gemini
 
 class AgentProcessor:
     # ---------- Few-shot Chain-of-Thought Examples ----------
@@ -86,7 +86,7 @@ class AgentProcessor:
         {"role": "user", "content": "USER_INSTRUCTION:\n<START>\n{user_input}\n<END>"},
     ]
 
-    def __init__(self, model: str = "gpt-4o", temperature: float = 0):
+    def __init__(self, model: str = "gemini-2.5-pro", temperature: float = 0):
         self.model = model
         self.temperature = temperature
 
@@ -109,16 +109,53 @@ class AgentProcessor:
             "dataset_test": "",
             "parameters": {},
         }
-
     def get_chatgpt_response(self, messages):
-        """
-        Call OpenAI chat model and return the assistant's response.
-        """
-        response = openai.chat.completions.create(
-            model=self.model, messages=messages, temperature=self.temperature
-        )
-        return response.choices[0].message.content.strip()
+    # If messages is a string (already a prompt), send as-is (used in extract_config)
+        if isinstance(messages, str):
+            prompt = messages
 
+    # If it's a list of few-shot examples (used in extract_config)
+        elif isinstance(messages, list) and all(isinstance(m, dict) for m in messages):
+        # Gemini doesn't understand role-based prompts well. Convert few-shot into text.
+            prompt = ""
+            for msg in messages:
+                if msg["role"] == "system":
+                    prompt += f"{msg['content']}\n\n"
+                elif msg["role"] == "user":
+                    prompt += f"User: {msg['content']}\n"
+                elif msg["role"] == "assistant":
+                    prompt += f"Assistant: {msg['content']}\n"
+        # Do not add assistant or user dialogue from self.messages
+        else:
+            raise ValueError("Invalid message format for Gemini prompt.")
+
+        response = query_gemini(prompt)
+        return response.strip()
+
+
+
+
+    # def extract_config(self, user_input: str) -> dict:
+    #     """
+    #     Run Few-shot CoT extraction for the given user command.
+    #     Returns a dictionary with algorithm, dataset, and parameters.
+    #     """
+    #     # Clone and format the prompt with the latest user input
+    #     prompt = [dict(p) for p in self.FEW_SHOT_COT_PROMPT]
+    #     prompt[-1]["content"] = prompt[-1]["content"].format(user_input=user_input)
+
+    #     assistant_text = self.get_chatgpt_response(prompt)
+    #     print("=== Gemini Response ===\n", assistant_text)
+
+    #     # Extract JSON object from the FINAL line
+    #     match = re.search(r"^FINAL:\s*(\{.*\})$", assistant_text, re.MULTILINE)
+    #     if not match:
+    #         return {}
+
+    #     try:
+    #         return json.loads(match.group(1))
+    #     except json.JSONDecodeError:
+    #         return {}
     def extract_config(self, user_input: str) -> dict:
         """
         Run Few-shot CoT extraction for the given user command.
@@ -129,16 +166,45 @@ class AgentProcessor:
         prompt[-1]["content"] = prompt[-1]["content"].format(user_input=user_input)
 
         assistant_text = self.get_chatgpt_response(prompt)
+        print("=== Gemini Response ===\n", assistant_text)
 
-        # Extract JSON object from the FINAL line
-        match = re.search(r"^FINAL:\s*(\{.*\})$", assistant_text, re.MULTILINE)
-        if not match:
+        # 1) Try exact FINAL: {...} pattern (preferred)
+        match = re.search(r"FINAL:\s*(\{.*\})", assistant_text, re.DOTALL | re.IGNORECASE)
+        json_str = None
+        if match:
+            json_str = match.group(1)
+        else:
+            # 2) Fallback: find the first {...} block anywhere in the response
+            start = assistant_text.find('{')
+            end = assistant_text.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                json_str = assistant_text[start:end+1]
+
+        if not json_str:
+            print("[extract_config] No JSON found in assistant response.")
             return {}
 
+        # Try to parse JSON safely
         try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
+            parsed = json.loads(json_str)
+        except Exception as e:
+            print(f"[extract_config] JSON parse error: {e}")
             return {}
+
+        # Sanitize dataset paths (strip quotes/spaces)
+        def _clean_path(v):
+            if not v:
+                return v
+            if isinstance(v, str):
+                return os.path.normpath(v.strip().strip('"').strip("'"))
+            return v
+
+        if "dataset_train" in parsed and parsed["dataset_train"] is not None:
+            parsed["dataset_train"] = _clean_path(parsed["dataset_train"])
+        if "dataset_test" in parsed and parsed["dataset_test"] is not None:
+            parsed["dataset_test"] = _clean_path(parsed["dataset_test"])
+
+        return parsed
 
     def run_chatbot(self):
         """
@@ -149,10 +215,11 @@ class AgentProcessor:
             [
                 self.experiment_config["algorithm"],
                 self.experiment_config["dataset_train"],
-                os.path.exists(self.experiment_config["dataset_train"]),
+                os.path.exists(os.path.normpath(self.experiment_config["dataset_train"]))
+,
                 (
                     not self.experiment_config["dataset_test"]
-                    or os.path.exists(self.experiment_config["dataset_test"])
+                    or os.path.exists(os.path.normpath(self.experiment_config["dataset_test"]))
                 ),
             ]
         ):
@@ -176,18 +243,56 @@ class AgentProcessor:
             # print(f"Chatbot: {assistant_reply}")
 
             # Extract structured information from user input
+        #     extracted = self.extract_config(user_input)
+
+        #     if extracted.get("algorithm"):
+        #         self.experiment_config["algorithm"] = extracted["algorithm"]
+        #     if extracted.get("dataset_train"):
+        #         self.experiment_config["dataset_train"] = extracted["dataset_train"]
+        #     if extracted.get("dataset_test"):
+        #         self.experiment_config["dataset_test"] = extracted["dataset_test"]
+        #     if extracted.get("parameters"):
+        #         self.experiment_config["parameters"].update(extracted["parameters"])
+
+        #     # Missing field guidance
+            
+        # if not self.experiment_config["algorithm"]:
+        #     print("Chatbot: Please specify which algorithm to run.")
+        # if (
+        #     not self.experiment_config["dataset_train"]
+        #     or not os.path.exists(os.path.normpath(self.experiment_config["dataset_train"]))
+        #     ):
+        #     print("Chatbot: Please provide a valid training dataset location.")
+            # Extract structured information from user input
             extracted = self.extract_config(user_input)
+
+            # DEBUG: show extracted content
+            print("[DEBUG] extracted:", extracted)
 
             if extracted.get("algorithm"):
                 self.experiment_config["algorithm"] = extracted["algorithm"]
+
             if extracted.get("dataset_train"):
-                self.experiment_config["dataset_train"] = extracted["dataset_train"]
+                # sanitized already in extract_config, but be safe:
+                self.experiment_config["dataset_train"] = os.path.normpath(
+                    str(extracted["dataset_train"]).strip().strip('"').strip("'")
+                )
+
             if extracted.get("dataset_test"):
-                self.experiment_config["dataset_test"] = extracted["dataset_test"]
+                self.experiment_config["dataset_test"] = os.path.normpath(
+                    str(extracted["dataset_test"]).strip().strip('"').strip("'")
+                )
+
             if extracted.get("parameters"):
                 self.experiment_config["parameters"].update(extracted["parameters"])
 
-            # Missing field guidance
+            # DEBUG: show normalized paths + existence
+            print("[DEBUG] normalized train path:", self.experiment_config["dataset_train"],
+                  "exists:", os.path.exists(self.experiment_config["dataset_train"]))
+            print("[DEBUG] normalized test  path:", self.experiment_config["dataset_test"],
+                  "exists:", os.path.exists(self.experiment_config["dataset_test"]))
+
+            # Missing field guidance (keep inside loop so user is prompted each attempt)
             if not self.experiment_config["algorithm"]:
                 print("Chatbot: Please specify which algorithm to run.")
             if (
@@ -210,6 +315,7 @@ if __name__ == "__main__":
     import sys
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
     from config.config import Config
-    os.environ['OPENAI_API_KEY'] = Config.OPENAI_API_KEY
+    genai.configure(api_key=Config.GEMINI_API_KEY)
+
     chatbot_instance = AgentProcessor()
     chatbot_instance.run_chatbot()
