@@ -10,10 +10,14 @@ from datetime import datetime, timedelta
 import ast
 from config.config import Config
 genai.configure(api_key=Config.GEMINI_API_KEY)
-
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import TerminalFormatter
 # Initialize OpenAI LLM
 from utils.gemini_client import query_gemini
-
+def print_python_code(code_str):
+    """Pretty print Python code with syntax highlighting in the terminal."""
+    print(highlight(code_str, PythonLexer(), TerminalFormatter()))
 template_pyod_labeled = PromptTemplate.from_template("""
 You are an expert Python developer with deep experience in anomaly detection libraries. Your task is to:
 
@@ -357,6 +361,66 @@ IMPORTANT RULES
 
 
 # ---------- CLASS ----------
+
+
+def extract_python_code(response_text: str) -> str:
+    """
+    Extracts and cleans Python code from Gemini's response.
+    - Handles triple backticks with/without 'python'.
+    - Fixes broken first lines (e.g., '{auroc_score}")').
+    - Adds missing imports/boilerplate if Gemini sends partial code.
+    - Auto-inserts AUROC/AUPRC metric calculations if missing.
+    """
+
+    # 1️⃣ Extract code from fenced blocks first
+    code_match = re.search(r"```(?:python)?\n(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+    if code_match:
+        code = code_match.group(1)
+    else:
+        code = response_text  # fallback: take entire response
+
+    # 2️⃣ Remove explanation/chat/debug lines
+    cleaned_lines = []
+    for line in code.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.lower().startswith(("response:", "output:", "note:", "explanation:", "[debug]")):
+            continue
+        cleaned_lines.append(line)
+
+    cleaned_code = "\n".join(cleaned_lines).strip()
+
+    # 3️⃣ Fix broken '{auroc_score}")' start
+    if cleaned_code.startswith("{auroc_score}"):
+        cleaned_code = f'print(f"AUROC: {{auroc_score}}")\n' + cleaned_code[len("{auroc_score}")+2:]
+
+    # 4️⃣ Safeguard: Add missing imports
+    required_imports = [
+        "import numpy as np",
+        "from sklearn.metrics import roc_auc_score, average_precision_score"
+    ]
+    if not any(line.startswith("import") or line.startswith("from") for line in cleaned_code.splitlines()):
+        cleaned_code = "\n".join(required_imports) + "\n" + cleaned_code
+
+    # 5️⃣ Auto-add AUROC/AUPRC calculations if missing
+    if "auroc_score" not in cleaned_code or "auprc_score" not in cleaned_code:
+        metric_code = (
+            "y_test_scores = model.decision_function(X_test)\n"
+            "auroc_score = roc_auc_score(y_test, y_test_scores)\n"
+            "auprc_score = average_precision_score(y_test, y_test_scores)\n"
+            'print(f"AUROC: {auroc_score}")\n'
+            'print(f"AUPRC: {auprc_score}")\n'
+        )
+        cleaned_code = cleaned_code + "\n\n# Added missing metrics\n" + metric_code
+
+    # 6️⃣ Ensure script starts with something valid
+    valid_starts = ("import ", "from ", "def ", "class ", "print(", "#")
+    if not cleaned_code.startswith(valid_starts):
+        cleaned_code = "# Auto-fixed script\n" + cleaned_code
+
+    return cleaned_code
+
 class AgentCodeGenerator:
     """Now responsible for code generation **and** modification."""
     def __init__(self):
@@ -382,17 +446,58 @@ class AgentCodeGenerator:
             tpl = template_tslib_labeled 
         else:
             tpl = template_darts_labeled if data_path_test else template_darts_unlabeled
-        prompt = tpl.invoke({
-    "algorithm": algorithm,
-    "data_path_train": data_path_train,
-    "data_path_test": data_path_test,
-    "algorithm_doc": algorithm_doc,
-    "parameters": str(input_parameters)
-          }).to_string()
+    #     prompt = tpl.invoke({
+    # "algorithm": algorithm,
+    # "data_path_train": data_path_train,
+    # "data_path_test": data_path_test,
+    # "algorithm_doc": algorithm_doc,
+    # "parameters": str(input_parameters)
+    #       }).to_string()
+        prompt = f"""
+You are a Python expert helping build an Anomaly Detection pipeline.
 
-        raw = query_gemini(prompt)
-        
-        return self._clean(raw)
+## Goal:
+Generate executable Python code for anomaly detection using the model "{algorithm}" 
+from the library "{package_name}".
+
+## Dataset Summary:
+Training dataset: {data_path_train}
+Testing dataset: {data_path_test}
+
+## Parameters:
+{input_parameters}
+
+## Output rules:
+- Respond ONLY with runnable Python code inside a single ```python``` code block.
+- No explanations, no docstrings, no comments, no "how to run" instructions.
+- The code must be self-contained and executable as-is.
+- Use pandas.read_csv() to load the dataset(s).
+- Dataset path will be replaced dynamically in backend.
+"""
+
+
+        # raw = query_gemini(prompt)
+        # print("[DEBUG] GEMINI RAW (codegen):", repr(raw))
+        raw_text = query_gemini(prompt)
+        # print("\n[DEBUG] GEMINI RAW TEXT (Selector, before JSON parse):\n", repr(raw_text), "\n")
+        final_code = extract_python_code(raw_text)
+        print("\n[DEBUG] GEMINI RAW TEXT (Selector, before JSON parse):\n")
+        print_python_code(raw_text)
+        # cleaned_code = self._clean(raw_text)
+        # content = raw_text  # keep for parse_gemini_choice()
+        print("\n[DEBUG] Cleaned Gemini code:\n")
+        # print_python_code(cleaned_code)
+        # try:
+        #   print_python_code(cleaned_code)
+        # except Exception as e:
+        #   print("[WARN] Could not pretty-print code:", e)
+            # Check if code is incomplete
+        # if len(cleaned_code.splitlines()) < 10 or "import" not in cleaned_code:
+        #   print("[WARN] Gemini output may be incomplete or not a full script.")
+
+    # Optional: pretty print to terminal
+
+        return final_code
 
     # -------- revision (moved from old Reviewer) --------
     def revise_code(self, code_quality: CodeQuality, algorithm_doc: str) -> str:
@@ -404,7 +509,13 @@ class AgentCodeGenerator:
         }).to_string()
 
         fixed = query_gemini(prompt)
+        print("[DEBUG] GEMINI RAW (fix):", repr(fixed))
+        raw_text = query_gemini(prompt)
+        # print("\n[DEBUG] GEMINI RAW TEXT (Selector, before JSON parse):\n", repr(raw_text), "\n")
+        print("\n[DEBUG] GEMINI RAW TEXT (Selector, before JSON parse):\n")
+        print_python_code(raw_text)
 
+        content = raw_text  # keep for parse_gemini_choice() 
         # increase review counter here
         code_quality.review_count += 1
         return self._clean(fixed)

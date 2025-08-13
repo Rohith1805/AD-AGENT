@@ -3,12 +3,18 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from entity.code_quality import CodeQuality
 from utils.gemini_client import query_gemini
 
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import TerminalFormatter
+
 
 from langchain_core.prompts import PromptTemplate
 
 # Initialize the OpenAI LLM
 
-
+def print_python_code(code_str):
+    """Pretty-print Python code in the terminal."""
+    print(highlight(code_str, PythonLexer(), TerminalFormatter()))
 # Prompt template for generating synthetic test data
 test_prompt = PromptTemplate.from_template("""
 You will receive a Python script for {package_name} that trains an anomaly-detection model with real datasets.
@@ -93,74 +99,210 @@ TASK:
     3. Output runnable Python **code only** (no explanations, no markdown).
 """)
 
+# class AgentReviewer:
+#     """Responsible for executing code and recording metrics only."""
+#     def __init__(self):
+#         pass
+
+#     def test_code(
+#         self,
+#         code: str,
+#         algorithm_name: str,
+#         package_name: str
+#     ) -> str:
+#         """
+#         Generate a test script using synthetic data and execute it.
+#         Return an empty string on success, or an error message on failure or exception.
+#         """
+#         try:
+#             # 1) Use LLM to rewrite the script to use synthetic data
+#             prompt = test_prompt.format(
+#             code=code,
+#             algorithm_name=algorithm_name,
+#             package_name=package_name
+#             )
+#             test_script = query_gemini(prompt)
+
+#             test_script = self._clean_markdown(test_script)
+
+#             # 2) Save the rewritten script to file
+#             folder = "generated_scripts"
+#             os.makedirs(folder, exist_ok=True)
+#             path = os.path.join(folder, f"{algorithm_name}_test.py")
+#             with open(path, "w", encoding="utf-8") as f:
+#                 f.write(test_script)
+
+#             # 3) Execute the test script
+#             res = subprocess.run(["python", path],
+#                                  capture_output=True, text=True)
+#             print("\n=== Test Execution Output ===\n",
+#                   res.stdout, res.stderr)
+
+#             if res.returncode != 0:
+#                 return res.stderr
+#             else:
+#                 return ""
+#         except Exception as e:
+#             print(f"[test_code] Exception: {e}")
+#             return str(e)
+
+#     @staticmethod
+#     def _clean_markdown(txt: str) -> str:
+#         """Remove markdown code fences from the script."""
+#         txt = re.sub(r"```(python)?", "", txt)
+#         return re.sub(r"```", "", txt).strip()
+
+#     # -------- helpers --------
+#     @staticmethod
+#     def _find(pattern, text, default=-1.0):
+#         """Find a float number from text using regex pattern."""
+#         m = re.search(pattern, text)
+#         return float(m.group(1)) if m else default
+
+#     @staticmethod
+#     def _find_errors(text):
+#         """Extract failed prediction points and true labels from output logs."""
+#         pts = []
+#         for line in text.splitlines():
+#             if "Failed prediction at point" in line:
+#                 m = re.search(r"\[([^\]]+)] with true label ([\d.]+)", line)
+#                 if m:
+#                     nums = [float(x.strip()) for x in m.group(1).split(",")]
+#                     pts.append({"point": nums, "true_label": float(m.group(2))})
+# #         return pts
+# class AgentReviewer:
+#     """Responsible for executing code and recording metrics only."""
+#     def __init__(self):
+#         pass
+
+#     def test_code(
+#         self,
+#         code: str,
+#         algorithm_name: str,
+#         package_name: str
+#     ) -> str:
+#         """
+#         Generate a test script using synthetic data and execute it.
+#         Return an empty string on success, or an error message on failure or exception.
+#         """
+#         try:
+#             # 1) Use LLM to rewrite the script to use synthetic data
+#             prompt = test_prompt.format(
+#                 code=code,
+#                 algorithm_name=algorithm_name,
+#                 package_name=package_name
+#             )
+#             raw_text = query_gemini(prompt)
+
+#             # Debug: show raw Gemini output
+#             print("\n[DEBUG] Raw Gemini Test Script:\n")
+#             print_python_code(raw_text)
+
+#             # Clean markdown fences
+#             test_script = self._clean_markdown(raw_text)
+
+#             # Debug: show cleaned code
+#             print("\n[DEBUG] Cleaned Test Script:\n")
+#             print_python_code(test_script)
+
+#             # 2) Save the rewritten script to file
+#             folder = "generated_scripts"
+#             os.makedirs(folder, exist_ok=True)
+#             path = os.path.join(folder, f"{algorithm_name}_test.py")
+#             with open(path, "w", encoding="utf-8") as f:
+#                 f.write(test_script)
+
+#             # 3) Execute the test script
+#             res = subprocess.run(["python", path],
+#                                  capture_output=True, text=True)
+#             print("\n=== Test Execution Output ===\n",
+#                   res.stdout, res.stderr)
+
+#             if res.returncode != 0:
+#                 return res.stderr
+#             else:
+#                 return ""
+#         except Exception as e:
+#             print(f"[test_code] Exception: {e}")
+#             return str(e)
+
+#     @staticmethod
+#     def _clean_markdown(txt: str) -> str:
+#         """Remove markdown code fences from the script."""
+#         txt = re.sub(r"```(python)?", "", txt)
+#         return re.sub(r"```", "", txt).strip()
+
+#     # -------- helpers --------
+#     @staticmethod
+#     def _find(pattern, text, default=-1.0):
+#         """Find a float number from text using regex pattern."""
+#         m = re.search(pattern, text)
+#         return float(m.group(1)) if m else default
+
+#     @staticmethod
+#     def _find_errors(text):
+#         """Extract failed prediction points and true labels from output logs."""
+#         pts = []
+#         for line in text.splitlines():
+#             if "Failed prediction at point" in line:
+#                 m = re.search(r"\[([^\]]+)] with true label ([\d.]+)", line)
+#                 if m:
+#                     nums = [float(x.strip()) for x in m.group(1).split(",")]
+#                     pts.append({"point": nums, "true_label": float(m.group(2))})
+#         return pts
 class AgentReviewer:
-    """Responsible for executing code and recording metrics only."""
+    """Responsible for verifying generated code using Gemini and deciding next steps."""
     def __init__(self):
         pass
 
-    def test_code(
-        self,
-        code: str,
-        algorithm_name: str,
-        package_name: str
-    ) -> str:
+    def test_code(self, code: str, algorithm_name: str, package_name: str) -> tuple:
         """
-        Generate a test script using synthetic data and execute it.
-        Return an empty string on success, or an error message on failure or exception.
+        1. Send generated code to Gemini for synthetic data testing.
+        2. Run the returned code.
+        3. If passes → return (True, cleaned_code)
+        4. If fails → return (False, error_message)
         """
         try:
-            # 1) Use LLM to rewrite the script to use synthetic data
+            # Ask Gemini to create a synthetic-data test version
             prompt = test_prompt.format(
-            code=code,
-            algorithm_name=algorithm_name,
-            package_name=package_name
+                code=code,
+                algorithm_name=algorithm_name,
+                package_name=package_name
             )
-            test_script = query_gemini(prompt)
+            raw_test_code = query_gemini(prompt)  # Gemini always outputs only Python
 
-            test_script = self._clean_markdown(test_script)
+            print("\n[DEBUG] Gemini Test Script:\n")
+            print_python_code(raw_test_code)
 
-            # 2) Save the rewritten script to file
+            # Clean markdown fences if any (should be rare if Gemini is strict)
+            cleaned_code = self._clean_markdown(raw_test_code)
+
+            # Save test script
             folder = "generated_scripts"
             os.makedirs(folder, exist_ok=True)
             path = os.path.join(folder, f"{algorithm_name}_test.py")
             with open(path, "w", encoding="utf-8") as f:
-                f.write(test_script)
+                f.write(cleaned_code)
 
-            # 3) Execute the test script
-            res = subprocess.run(["python", path],
-                                 capture_output=True, text=True)
-            print("\n=== Test Execution Output ===\n",
-                  res.stdout, res.stderr)
+            # Run the test script
+            res = subprocess.run(
+                ["python", path],
+                capture_output=True, text=True
+            )
+
+            print("\n=== Test Execution Output ===\n", res.stdout, res.stderr)
 
             if res.returncode != 0:
-                return res.stderr
+                # Test failed → return failure + error for regeneration
+                return False, res.stderr
             else:
-                return ""
+                # Test passed → return success + cleaned code
+                return True, cleaned_code
+
         except Exception as e:
-            print(f"[test_code] Exception: {e}")
-            return str(e)
+            return False, str(e)
 
     @staticmethod
     def _clean_markdown(txt: str) -> str:
-        """Remove markdown code fences from the script."""
         txt = re.sub(r"```(python)?", "", txt)
         return re.sub(r"```", "", txt).strip()
-
-    # -------- helpers --------
-    @staticmethod
-    def _find(pattern, text, default=-1.0):
-        """Find a float number from text using regex pattern."""
-        m = re.search(pattern, text)
-        return float(m.group(1)) if m else default
-
-    @staticmethod
-    def _find_errors(text):
-        """Extract failed prediction points and true labels from output logs."""
-        pts = []
-        for line in text.splitlines():
-            if "Failed prediction at point" in line:
-                m = re.search(r"\[([^\]]+)] with true label ([\d.]+)", line)
-                if m:
-                    nums = [float(x.strip()) for x in m.group(1).split(",")]
-                    pts.append({"point": nums, "true_label": float(m.group(2))})
-        return pts

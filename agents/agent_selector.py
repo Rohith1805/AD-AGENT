@@ -210,6 +210,8 @@ class AgentSelector:
     def parse_gemini_choice(self, content):
       """Safely parse Gemini JSON output and extract 'choice'."""
       try:
+        print("[DEBUG] Raw content before JSON parse:", repr(content))
+
         data = json.loads(content)
         algorithm = data.get("choice")
         if not algorithm:
@@ -235,6 +237,9 @@ class AgentSelector:
         size = self.X_train.shape[0]
         dim = self.X_train.shape[1]
         messages = generate_model_selection_prompt_from_pyod(name, size, dim)
+        # print("[DEBUG] GEMINI RAW TEXT (selector):", messages.text)
+        print("[DEBUG] GEMINI RAW TEXT (selector):", [msg["content"] for msg in messages])
+
 
       elif self.package_name == "pygod":
         if self.X_train is None:
@@ -244,6 +249,12 @@ class AgentSelector:
         num_feature = self.X_train.num_features
         avg_degree = num_edge / num_node
         messages = generate_model_selection_prompt_from_pygod(name, num_node, num_edge, num_feature, avg_degree)
+        # print("[DEBUG] GEMINI RAW TEXT (selector):", messages.text)
+        try:
+          parsed = json.loads(messages.text)
+          print("[DEBUG] Gemini JSON (pretty):\n", json.dumps(parsed, indent=4))
+        except json.JSONDecodeError:
+          print("[DEBUG] Gemini raw text (unparsed):\n", messages.text)
 
       else:  # Time series
         if self.X_train is None or isinstance(self.X_train, str):
@@ -258,7 +269,10 @@ class AgentSelector:
 
     # Query Gemini
       prompt = "\n".join([msg["content"] for msg in messages])
-      content = query_gemini(prompt)
+      prompt += "\n\nIMPORTANT: Reply ONLY with a valid JSON object containing keys 'reason' and 'choice'. Do not include any text outside the JSON."
+      raw_text = query_gemini(prompt)
+      print("\n[DEBUG] GEMINI RAW TEXT (Selector, before JSON parse):\n", repr(raw_text), "\n")
+      content = raw_text  # keep for parse_gemini_choice()       
       print("[DEBUG] Gemini raw output:", content)
 
     # Parse choice and update
