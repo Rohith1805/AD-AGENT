@@ -250,59 +250,116 @@ TASK:
 #                     nums = [float(x.strip()) for x in m.group(1).split(",")]
 #                     pts.append({"point": nums, "true_label": float(m.group(2))})
 #         return pts
+# class AgentReviewer:
+#     """Responsible for verifying generated code using Gemini and deciding next steps."""
+#     def __init__(self):
+#         pass
+
+#     def test_code(self, code: str, algorithm_name: str, package_name: str) -> tuple:
+#         """
+#         1. Send generated code to Gemini for synthetic data testing.
+#         2. Run the returned code.
+#         3. If passes → return (True, cleaned_code)
+#         4. If fails → return (False, error_message)
+#         """
+#         try:
+#             # Ask Gemini to create a synthetic-data test version
+#             prompt = test_prompt.format(
+#                 code=code,
+#                 algorithm_name=algorithm_name,
+#                 package_name=package_name
+#             )
+#             raw_test_code = query_gemini(prompt)  # Gemini always outputs only Python
+
+#             print("\n[DEBUG] Gemini Test Script:\n")
+#             print_python_code(raw_test_code)
+
+#             # Clean markdown fences if any (should be rare if Gemini is strict)
+#             cleaned_code = self._clean_markdown(raw_test_code)
+
+#             # Save test script
+#             folder = "generated_scripts"
+#             os.makedirs(folder, exist_ok=True)
+#             path = os.path.join(folder, f"{algorithm_name}_test.py")
+#             with open(path, "w", encoding="utf-8") as f:
+#                 f.write(cleaned_code)
+
+#             # Run the test script
+#             res = subprocess.run(
+#                 ["python", path],
+#                 capture_output=True, text=True
+#             )
+
+#             print("\n=== Test Execution Output ===\n", res.stdout, res.stderr)
+
+#             if res.returncode != 0:
+#                 # Test failed → return failure + error for regeneration
+#                 return False, res.stderr
+#             else:
+#                 # Test passed → return success + cleaned code
+#                 return True, cleaned_code
+
+#         except Exception as e:
+#             return False, str(e)
+
+#     @staticmethod
+#     def _clean_markdown(txt: str) -> str:
+#         txt = re.sub(r"```(python)?", "", txt)
+#         return re.sub(r"```", "", txt).strip()
+import os, re, subprocess
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import TerminalFormatter
+
 class AgentReviewer:
-    """Responsible for verifying generated code using Gemini and deciding next steps."""
+    """Responsible for verifying generated code by executing it."""
+
     def __init__(self):
         pass
 
-    def test_code(self, code: str, algorithm_name: str, package_name: str) -> tuple:
+    @staticmethod
+    def print_python_code(code_str):
+        """Pretty-print Python code in the terminal."""
+        print(highlight(code_str, PythonLexer(), TerminalFormatter()))
+
+    def test_code(self, code: str, algorithm_name: str, package_name: str) -> str:
         """
-        1. Send generated code to Gemini for synthetic data testing.
-        2. Run the returned code.
-        3. If passes → return (True, cleaned_code)
-        4. If fails → return (False, error_message)
+        Directly run the generated code from code_generator.
+        Return empty string if passes, or error message if fails.
         """
         try:
-            # Ask Gemini to create a synthetic-data test version
-            prompt = test_prompt.format(
-                code=code,
-                algorithm_name=algorithm_name,
-                package_name=package_name
-            )
-            raw_test_code = query_gemini(prompt)  # Gemini always outputs only Python
+            # Show the code we got
+            print("\n[DEBUG] Received Generated Code:\n")
+            self.print_python_code(code)
 
-            print("\n[DEBUG] Gemini Test Script:\n")
-            print_python_code(raw_test_code)
+            # Clean markdown fences if any
+            cleaned_code = self._clean_markdown(code)
 
-            # Clean markdown fences if any (should be rare if Gemini is strict)
-            cleaned_code = self._clean_markdown(raw_test_code)
-
-            # Save test script
+            # Save script
             folder = "generated_scripts"
             os.makedirs(folder, exist_ok=True)
             path = os.path.join(folder, f"{algorithm_name}_test.py")
             with open(path, "w", encoding="utf-8") as f:
                 f.write(cleaned_code)
 
-            # Run the test script
+            # Run script
             res = subprocess.run(
-                ["python", path],
+                # ["python", path],
+                [sys.executable, path],
                 capture_output=True, text=True
             )
 
             print("\n=== Test Execution Output ===\n", res.stdout, res.stderr)
 
             if res.returncode != 0:
-                # Test failed → return failure + error for regeneration
-                return False, res.stderr
+                return res.stderr
             else:
-                # Test passed → return success + cleaned code
-                return True, cleaned_code
-
+                return ""
         except Exception as e:
-            return False, str(e)
+            return str(e)
 
     @staticmethod
     def _clean_markdown(txt: str) -> str:
+        """Remove markdown code fences."""
         txt = re.sub(r"```(python)?", "", txt)
         return re.sub(r"```", "", txt).strip()
