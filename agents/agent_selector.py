@@ -2,10 +2,13 @@ from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 import os
+from scipy.io import loadmat
 import sys
 import google.generativeai as genai
 from config.config import Config
-
+import torch
+import numpy as np
+import pandas as pd
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from data_loader.data_loader import DataLoader
 from ad_model_selection.prompts.pygod_ms_prompt import generate_model_selection_prompt_from_pygod
@@ -16,35 +19,7 @@ from utils.gemini_client import query_gemini
 import json
 
 class AgentSelector:
-    # def __init__(self, user_input):
-    #   self.parameters = user_input['parameters']
-    #   self.data_path_train = user_input['dataset_train']
-    #   self.data_path_test = user_input['dataset_test']
-    #   self.user_input = user_input
 
-    #   # if user_input['dataset_train'].endswith(".pt"):
-    #   #   self.package_name = "pygod"
-    #   # elif user_input['dataset_train'].endswith(".mat"):
-    #   #   self.package_name = "pyod"
-    #   # elif user_input['dataset_train'].endswith("_train.npy"):
-    #   #   user_input['dataset_train'] = user_input['dataset_train'].replace("_train.npy", "")
-    #   #   self.package_name = "tslib"
-    #   # else:
-    #   #   self.package_name = "darts"
-
-
-    #   self.tools = self.generate_tools(user_input['algorithm'])
-
-    #   self.load_data(self.data_path_train, self.data_path_test)
-    #   self.set_tools()
-
-    #   print(f"Package name: {self.package_name}")
-    #   print(f"Algorithm: {user_input['algorithm']}")
-    #   print(f"Tools: {self.tools}")
-
-      
-    #   self.documents = self.load_and_split_documents()
-    #   self.vectorstore = self.build_vectorstore(self.documents)
     def __init__(self, user_input):
         self.parameters = user_input['parameters']
         self.data_path_train = user_input['dataset_train']
@@ -67,146 +42,175 @@ class AgentSelector:
         # 4️⃣ Load and split docs, build vector store
         self.documents = self.load_and_split_documents()
         self.vectorstore = self.build_vectorstore(self.documents)
+
+
+    # def load_data(self, train_path, test_path):
+    #   ext_train = os.path.splitext(train_path)[-1].lower() if os.path.isfile(train_path) else None
+
+    # # --- TRAIN DATA ---
+    #   if ext_train == ".csv":
+    #     train_loader = DataLoader(train_path, store_script=True, store_path="train_data_loader.py")
+    #     X_train, y_train = train_loader.load_data(split_data=False)
+
+    #   elif ext_train == ".npy":
+    #     X_train = np.load(train_path)
+    #     y_train = None
+
+    #   elif ext_train == ".pt":
+    #     data = torch.load(train_path)
+    #     if hasattr(data, "x") and hasattr(data, "y"):  # typical pygod graph
+    #         X_train, y_train = data.x, data.y
+    #     else:
+    #         X_train, y_train = data, None
+
+    #   elif os.path.isdir(train_path):  # time-series folder (like MSL)
+    #     X_train, y_train = "tslib", "time-series"
+
+    #   else:
+    #     raise ValueError(f"Unsupported train data format: {train_path}")
+
+    #   self.X_train, self.y_train = X_train, y_train
+
+    # # --- TEST DATA ---
+    #   if test_path and os.path.exists(test_path):
+    #     ext_test = os.path.splitext(test_path)[-1].lower() if os.path.isfile(test_path) else None
+
+    #     if ext_test == ".csv":
+    #         test_loader = DataLoader(test_path, store_script=True, store_path="test_data_loader.py")
+    #         X_test, y_test = test_loader.load_data(split_data=False)
+
+    #     elif ext_test == ".npy":
+    #         X_test = np.load(test_path)
+    #         y_test = None
+
+    #     elif ext_test == ".pt":
+    #         data = torch.load(test_path)
+    #         if hasattr(data, "x") and hasattr(data, "y"):
+    #             X_test, y_test = data.x, data.y
+    #         else:
+    #             X_test, y_test = data, None
+
+    #     elif os.path.isdir(test_path):
+    #         X_test, y_test = "tslib", "time-series"
+
+    #     else:
+    #         raise ValueError(f"Unsupported test data format: {test_path}")
+
+    #     self.X_test, self.y_test = X_test, y_test
+    #   else:
+    #     self.X_test, self.y_test = None, None
+
+    # # --- Set package name automatically ---
+    #   if type(self.X_train) is str and self.X_train == "tslib":
+    #     self.package_name = "tslib"
+    #   elif ext_train == ".npy":
+    #     self.package_name = "tslib"
+    #     if self.X_train is not None and len(self.X_train.shape) > 1:
+    #         num_features = self.X_train.shape[1]
+    #         self.parameters["enc_in"] = num_features
+    #         self.parameters["c_out"] = num_features
+    #   elif ext_train == ".pt" or (type(y_train) is str and y_train == "graph"):
+    #     self.package_name = "pygod"
+    #   elif type(y_train) is str and y_train == "time-series":
+    #     self.package_name = "darts"
+    #   else:
+    #     self.package_name = "pyod"
+
+
+
     def load_data(self, train_path, test_path):
-      train_loader = DataLoader(train_path, store_script=True, store_path='train_data_loader.py')
-      X_train, y_train = train_loader.load_data(split_data=False)
-      print(f"[DEBUG] load_data() returned: X_train={type(X_train)}, y_train={type(y_train)}")
-      self.X_train = X_train
-      self.y_train = y_train
+      ext_train = os.path.splitext(train_path)[-1].lower() if os.path.isfile(train_path) else None
 
-      # Only load test data if test_path is provided and not empty
-      if test_path and os.path.exists(test_path):
-          test_loader = DataLoader(test_path, store_script=True, store_path='test_data_loader.py')
-          X_test, y_test = test_loader.load_data(split_data=False)
-          self.X_test = X_test
-          self.y_test = y_test
+    # --- TRAIN DATA ---
+      if ext_train == ".csv":
+        train_loader = DataLoader(train_path, store_script=True, store_path="train_data_loader.py")
+        X_train, y_train = train_loader.load_data(split_data=False)
+
+      elif ext_train == ".npy":
+        X_train = np.load(train_path)
+        y_train = None
+
+      elif ext_train == ".pt":
+        data = torch.load(train_path)
+        if hasattr(data, "x") and hasattr(data, "y"):  # typical pygod graph
+            X_train, y_train = data.x, data.y
+        else:
+            X_train, y_train = data, None
+
+      elif ext_train == ".mat":   # ✅ NEW: support MATLAB files
+        data = loadmat(train_path)
+        # assume the dataset follows standard naming conventions
+        # you may need to adjust these keys depending on dataset
+        if "X" in data and "y" in data:
+            X_train, y_train = data["X"], data["y"].ravel()
+        else:
+            # fallback: pick the first two arrays
+            keys = [k for k in data.keys() if not k.startswith("__")]
+            X_train = data[keys[0]]
+            y_train = data[keys[1]].ravel() if len(keys) > 1 else None
+
+      elif os.path.isdir(train_path):  # time-series folder (like MSL)
+        X_train, y_train = "tslib", "time-series"
+
       else:
-          self.X_test = None
-          self.y_test = None
+        raise ValueError(f"Unsupported train data format: {train_path}")
 
-     
-      if type(self.X_train) is str and self.X_train == 'tslib':
+      self.X_train, self.y_train = X_train, y_train
+
+    # --- TEST DATA ---
+      if test_path and os.path.exists(test_path):
+        ext_test = os.path.splitext(test_path)[-1].lower() if os.path.isfile(test_path) else None
+
+        if ext_test == ".csv":
+            test_loader = DataLoader(test_path, store_script=True, store_path="test_data_loader.py")
+            X_test, y_test = test_loader.load_data(split_data=False)
+
+        elif ext_test == ".npy":
+            X_test = np.load(test_path)
+            y_test = None
+
+        elif ext_test == ".pt":
+            data = torch.load(test_path)
+            if hasattr(data, "x") and hasattr(data, "y"):
+                X_test, y_test = data.x, data.y
+            else:
+                X_test, y_test = data, None
+
+        elif ext_test == ".mat":   # ✅ NEW: support MATLAB files
+            data = loadmat(test_path)
+            if "X" in data and "y" in data:
+                X_test, y_test = data["X"], data["y"].ravel()
+            else:
+                keys = [k for k in data.keys() if not k.startswith("__")]
+                X_test = data[keys[0]]
+                y_test = data[keys[1]].ravel() if len(keys) > 1 else None
+
+        elif os.path.isdir(test_path):
+            X_test, y_test = "tslib", "time-series"
+
+        else:
+            raise ValueError(f"Unsupported test data format: {test_path}")
+
+        self.X_test, self.y_test = X_test, y_test
+      else:
+        self.X_test, self.y_test = None, None
+
+    # --- Set package name automatically ---
+      if type(self.X_train) is str and self.X_train == "tslib":
         self.package_name = "tslib"
-      elif train_path.endswith('.npy'):
+      elif ext_train == ".npy":
         self.package_name = "tslib"
-        if self.X_train is not None:
-          if len(self.X_train.shape) > 1:
+        if self.X_train is not None and len(self.X_train.shape) > 1:
             num_features = self.X_train.shape[1]
-            self.parameters['enc_in'] = num_features
-            self.parameters['c_out'] = num_features
-      elif train_path.endswith('.pt') or type(y_train) is str and y_train == 'graph':
+            self.parameters["enc_in"] = num_features
+            self.parameters["c_out"] = num_features
+      elif ext_train == ".pt" or (type(y_train) is str and y_train == "graph"):
         self.package_name = "pygod"
-      elif type(y_train) is str and y_train == 'time-series':
+      elif type(y_train) is str and y_train == "time-series":
         self.package_name = "darts"
       else:
         self.package_name = "pyod"
 
-    # def set_tools(self):
-    #   user_input = self.user_input
-    #   if user_input['algorithm'] and user_input['algorithm'][0].lower() == "all":
-    #     self.tools = self.generate_tools(user_input['algorithm'])
-    #   else:
-    #     name = os.path.basename(self.data_path_train)
-    #     if self.package_name == "pyod":
-    #       size = self.X_train.shape[0]
-    #       dim = self.X_train.shape[1]
-    #       messages = generate_model_selection_prompt_from_pyod(name, size, dim)
-    #       prompt = "\n".join([msg["content"] for msg in messages])
-    #       content = query_gemini(prompt)
-    #       print("[DEBUG] Gemini raw output:", content)
-
-    #       # algorithm = json.loads(content)["choice"]
-    #       try:
-    #         data = json.loads(content)
-    #         algorithm = data.get("choice")
-    #         if not algorithm:
-    #           raise ValueError(f"Gemini did not return 'choice': {data}")
-    #       except json.JSONDecodeError:
-    #         raise ValueError(f"Invalid JSON from Gemini: {content}")
-
-    #     elif self.package_name == 'pygod':
-    #       num_node = self.X_train.num_nodes
-    #       num_edge = self.X_train.num_edges
-    #       num_feature = self.X_train.num_features
-    #       avg_degree = num_edge / num_node
-    #       print(f"num_node: {num_node}, num_edge: {num_edge}, num_feature: {num_feature}, avg_degree: {avg_degree}")
-    #       messages = generate_model_selection_prompt_from_pygod(name, num_node, num_edge, num_feature, avg_degree)
-    #       prompt = "\n".join([msg["content"] for msg in messages])
-    #       content = query_gemini(prompt)
-    #       print("[DEBUG] Gemini raw output:", content)
-
-    #       # algorithm = json.loads(content)["choice"]
-    #       try:
-    #         data = json.loads(content)
-    #         algorithm = data.get("choice")
-    #         if not algorithm:
-    #           raise ValueError(f"Gemini did not return 'choice': {data}")
-    #       except json.JSONDecodeError:
-    #         raise ValueError(f"Invalid JSON from Gemini: {content}")
-    #       # print(f"Algorithm: {algorithm}")
-    #     # else: # for time series data
-    #     #   if self.X_train is not None and type(self.X_train) is not str:
-    #     #     print('Shape of X_train:', self.X_train.shape)
-    #     #     if len(self.X_train.shape) > 1:
-    #     #       num_features = self.X_train.shape[1]
-    #     #       self.parameters['enc_in'] = num_features
-            
-    #     #     num_signals = len(self.X_train)
-    #     #     dim = self.X_train.shape[1]  # number of features in training data
-    #     #     series_type = "multivariate" if dim > 1 else "univariate"
-    #     #     messages = generate_model_selection_prompt_from_timeseries(name, num_signals,dim, series_type)
-    #     #     prompt = "\n".join([msg["content"] for msg in messages])
-    #     #     content = query_gemini(prompt)
-    #     #     print("[DEBUG] Gemini raw output:", content)
-
-    #     #     # algorithm = json.loads(content)["choice"]
-    #     #   try:
-    #     #     data = json.loads(content)
-    #     #     algorithm = data.get("choice")
-    #     #     if not algorithm:
-    #     #       raise ValueError(f"Gemini did not return 'choice': {data}")
-    #     #   except json.JSONDecodeError:
-    #     #     raise ValueError(f"Invalid JSON from Gemini: {content}")
-    #     #     print(f"Algorithm: {algorithm}")
-    #     #   else:
-    #     #     algorithm = 'Autoformer'
-
-    #     # print('Selector Parameters:', self.parameters)
-    #     else:  # for time series data
-    #       if self.X_train is not None and type(self.X_train) is not str:
-    #         print('Shape of X_train:', self.X_train.shape)
-    #         if len(self.X_train.shape) > 1:
-    #           num_features = self.X_train.shape[1]
-    #           self.parameters['enc_in'] = num_features
-        
-    #         num_signals = len(self.X_train)
-    #         dim = self.X_train.shape[1]
-    #         series_type = "multivariate" if dim > 1 else "univariate"
-
-    #         messages = generate_model_selection_prompt_from_timeseries(name, num_signals, dim, series_type)
-    #         prompt = "\n".join([msg["content"] for msg in messages])
-    #         content = query_gemini(prompt)
-    #         print("[DEBUG] Gemini raw output:", content)
-
-    #         try:
-    #           data = json.loads(content)
-    #           algorithm = data.get("choice")
-    #           if not algorithm:
-    #             raise ValueError(f"Gemini did not return 'choice': {data}")
-    #         except json.JSONDecodeError:
-    #           raise ValueError(f"Invalid JSON from Gemini: {content}")
-    #       else:
-    #         algorithm = 'Autoformer'
-    # def parse_gemini_choice(self, content):
-    #   """Safely parse Gemini JSON output and extract 'choice'."""
-    #   try:
-    #     data = json.loads(content)
-    #     algorithm = data.get("choice")
-    #     if not algorithm:
-    #       raise ValueError(f"Gemini did not return 'choice': {data}")
-    #     return algorithm
-    #   except json.JSONDecodeError:
-    #     raise ValueError(f"Invalid JSON from Gemini: {content}")
     def parse_gemini_choice(self, content):
       """Safely parse Gemini JSON output and extract 'choice'."""
       try:
