@@ -51,7 +51,7 @@ IMPORTANT:
 - Do NOT input optional or incorrect parameters.
 """)
 
-template_pyod_unlabeled = PromptTemplate.from_template("""
+template_pyod_unlabeled = PromptTemplate.from_template( """
 You are an expert Python developer with deep experience in anomaly detection libraries. Your task is to:
 
 1. Use the provided official documentation content for `{algorithm}` to understand how to use the specified algorithm class, including initialization, training, and prediction methods.
@@ -80,7 +80,7 @@ You are an expert Python developer with deep experience in anomaly detection lib
 IMPORTANT: 
 - Strictly follow steps (2)-(8) to load the data from `{data_path_train}` & {data_path_test}.
 - Do NOT input optional or incorrect parameters.
-""")
+""" )
 
 
 template_pygod_labeled = PromptTemplate.from_template("""
@@ -372,7 +372,7 @@ def extract_python_code(response_text: str) -> str:
     - Auto-inserts AUROC/AUPRC metric calculations if missing.
     """
 
-    # 1️⃣ Extract code from fenced blocks first
+    #1️⃣ Extract code from fenced blocks first
     code_match = re.search(r"```(?:python)?\n(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
     if code_match:
         code = code_match.group(1)
@@ -446,34 +446,35 @@ class AgentCodeGenerator:
             tpl = template_tslib_labeled 
         else:
             tpl = template_darts_labeled if data_path_test else template_darts_unlabeled
-    #     prompt = tpl.invoke({
-    # "algorithm": algorithm,
-    # "data_path_train": data_path_train,
-    # "data_path_test": data_path_test,
-    # "algorithm_doc": algorithm_doc,
-    # "parameters": str(input_parameters)
-    #       }).to_string()
-        prompt = f"""
-You are a Python expert helping build an Anomaly Detection pipeline.
+        prompt = tpl.invoke({
+    "algorithm": algorithm,
+    "data_path_train": data_path_train,
+    "data_path_test": data_path_test,
+    "algorithm_doc": algorithm_doc,
+    "parameters": str(input_parameters)
+          }).to_string()
+        
+        # prompt = f"""
+# You are a Python expert helping build an Anomaly Detection pipeline.
 
-## Goal:
-Generate executable Python code for anomaly detection using the model "{algorithm}" 
-from the library "{package_name}".
+# ## Goal:
+# Generate executable Python code for anomaly detection using the model "{algorithm}" 
+# from the library "{package_name}".
 
-## Dataset Summary:
-Training dataset: {data_path_train}
-Testing dataset: {data_path_test}
+# ## Dataset Summary:
+# Training dataset: {data_path_train}
+# Testing dataset: {data_path_test}
 
-## Parameters:
-{input_parameters}
+# ## Parameters:
+# {input_parameters}
 
-## Output rules:
-- Respond ONLY with runnable Python code inside a single ```python``` code block.
-- No explanations, no docstrings, no comments, no "how to run" instructions.
-- The code must be self-contained and executable as-is.
-- Use pandas.read_csv() to load the dataset(s).
-- Dataset path will be replaced dynamically in backend.
-"""
+# ## Output rules:
+# - Respond ONLY with runnable Python code inside a single ```python``` code block.
+# - No explanations, no docstrings, no comments, no "how to run" instructions.
+# - The code must be self-contained and executable as-is.
+# - Use pandas.read_csv() to load the dataset(s).
+# - Dataset path will be replaced dynamically in backend.
+# """
 
 
         # raw = query_gemini(prompt)

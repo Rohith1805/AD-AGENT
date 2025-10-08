@@ -11,7 +11,10 @@ import os
 import re
 import json
 import google.generativeai as genai
+import sys
+
 from utils.gemini_client import query_gemini
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 class AgentProcessor:
     # ---------- Few-shot Chain-of-Thought Examples ----------
@@ -169,6 +172,7 @@ class AgentProcessor:
         print("=== Gemini Response ===\n", assistant_text)
 
         # 1) Try exact FINAL: {...} pattern (preferred)
+        user_text_lower = user_input.lower() if user_input else ""
         match = re.search(r"FINAL:\s*(\{.*\})", assistant_text, re.DOTALL | re.IGNORECASE)
         json_str = None
         if match:
@@ -203,6 +207,13 @@ class AgentProcessor:
             parsed["dataset_train"] = _clean_path(parsed["dataset_train"])
         if "dataset_test" in parsed and parsed["dataset_test"] is not None:
             parsed["dataset_test"] = _clean_path(parsed["dataset_test"])
+# Auto-fill missing algorithm field if user didn't specify any
+        if not parsed.get("algorithm") or len(parsed["algorithm"]) == 0:
+    # If user mentioned anomaly or detection and provided a dataset path
+            user_text_lower = user_input.lower()
+        if ("anomaly" in user_text_lower or "detect" in user_text_lower) and parsed.get("dataset_train"):
+            parsed["algorithm"] = ["all"]
+            print("[INFO] No algorithm specified — auto-selecting all algorithms.")
 
         return parsed
 
@@ -238,8 +249,9 @@ class AgentProcessor:
             self.messages.append({"role": "user", "content": user_input})
 
             # Get assistant reply for user engagement
-            assistant_reply = self.get_chatgpt_response(self.messages)
-            self.messages.append({"role": "assistant", "content": assistant_reply})
+            # assistant_reply = self.get_chatgpt_response(self.messages)
+            # self.messages.append({"role": "assistant", "content": assistant_reply})
+            # print("assistant_reply", assistant_reply)
             # print(f"Chatbot: {assistant_reply}")
 
             # Extract structured information from user input

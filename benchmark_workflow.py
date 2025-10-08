@@ -13,7 +13,7 @@ import glob
 
 # ─── Bootstrap API key & logging ───────────────────────────────────────────────
 from config.config import Config
-os.environ["OPENAI_API_KEY"] = Config.OPENAI_API_KEY
+os.environ["Goo"] = Config.OPENAI_API_KEY
 logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
 
 # ─── Instrumentation helpers ──────────────────────────────────────────────────

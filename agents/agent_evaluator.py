@@ -99,7 +99,9 @@ class AgentEvaluator:
             f.write(cleaned_code)
 
         # Execute the script using subprocess and capture output
-        res = subprocess.run(["python", path], capture_output=True, text=True)
+        # res = subprocess.run(["python", path], capture_output=True, text=True)
+        res = subprocess.run([sys.executable, path], capture_output=True, text=True)
+
         print("\n=== Real-Data Execution Output ===\n", res.stdout, res.stderr)
 
         # If execution failed, return error result
