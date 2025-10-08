@@ -12,7 +12,6 @@ import re
 import json
 import google.generativeai as genai
 import sys
-
 from utils.gemini_client import query_gemini
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
