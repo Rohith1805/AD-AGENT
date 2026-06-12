@@ -137,27 +137,7 @@ class AgentProcessor:
 
 
 
-    # def extract_config(self, user_input: str) -> dict:
-    #     """
-    #     Run Few-shot CoT extraction for the given user command.
-    #     Returns a dictionary with algorithm, dataset, and parameters.
-    #     """
-    #     # Clone and format the prompt with the latest user input
-    #     prompt = [dict(p) for p in self.FEW_SHOT_COT_PROMPT]
-    #     prompt[-1]["content"] = prompt[-1]["content"].format(user_input=user_input)
 
-    #     assistant_text = self.get_chatgpt_response(prompt)
-    #     print("=== Gemini Response ===\n", assistant_text)
-
-    #     # Extract JSON object from the FINAL line
-    #     match = re.search(r"^FINAL:\s*(\{.*\})$", assistant_text, re.MULTILINE)
-    #     if not match:
-    #         return {}
-
-    #     try:
-    #         return json.loads(match.group(1))
-    #     except json.JSONDecodeError:
-    #         return {}
     def extract_config(self, user_input: str) -> dict:
         """
         Run Few-shot CoT extraction for the given user command.
@@ -247,34 +227,7 @@ class AgentProcessor:
             # Add to conversation history
             self.messages.append({"role": "user", "content": user_input})
 
-            # Get assistant reply for user engagement
-            # assistant_reply = self.get_chatgpt_response(self.messages)
-            # self.messages.append({"role": "assistant", "content": assistant_reply})
-            # print("assistant_reply", assistant_reply)
-            # print(f"Chatbot: {assistant_reply}")
-
-            # Extract structured information from user input
-        #     extracted = self.extract_config(user_input)
-
-        #     if extracted.get("algorithm"):
-        #         self.experiment_config["algorithm"] = extracted["algorithm"]
-        #     if extracted.get("dataset_train"):
-        #         self.experiment_config["dataset_train"] = extracted["dataset_train"]
-        #     if extracted.get("dataset_test"):
-        #         self.experiment_config["dataset_test"] = extracted["dataset_test"]
-        #     if extracted.get("parameters"):
-        #         self.experiment_config["parameters"].update(extracted["parameters"])
-
-        #     # Missing field guidance
-            
-        # if not self.experiment_config["algorithm"]:
-        #     print("Chatbot: Please specify which algorithm to run.")
-        # if (
-        #     not self.experiment_config["dataset_train"]
-        #     or not os.path.exists(os.path.normpath(self.experiment_config["dataset_train"]))
-        #     ):
-        #     print("Chatbot: Please provide a valid training dataset location.")
-            # Extract structured information from user input
+ 
             extracted = self.extract_config(user_input)
 
             # DEBUG: show extracted content
