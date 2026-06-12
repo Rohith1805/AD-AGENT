@@ -1,8 +1,7 @@
 import logging, sys, operator, asyncio, os
 from typing import TypedDict, Annotated, Sequence, List, Tuple, Any
 
-import google.generativeai as genai  # ✅ ADD THIS LINE
-
+import google.generativeai as genai  
 from config.config import Config
 genai.configure(api_key=Config.GEMINI_API_KEY)
 
