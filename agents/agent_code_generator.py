@@ -372,14 +372,14 @@ def extract_python_code(response_text: str) -> str:
     - Auto-inserts AUROC/AUPRC metric calculations if missing.
     """
 
-    #1️⃣ Extract code from fenced blocks first
+    #1️ Extract code from fenced blocks first
     code_match = re.search(r"```(?:python)?\n(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
     if code_match:
         code = code_match.group(1)
     else:
         code = response_text  # fallback: take entire response
 
-    # 2️⃣ Remove explanation/chat/debug lines
+    # 2️ Remove explanation/chat/debug lines
     cleaned_lines = []
     for line in code.splitlines():
         stripped = line.strip()
@@ -391,11 +391,11 @@ def extract_python_code(response_text: str) -> str:
 
     cleaned_code = "\n".join(cleaned_lines).strip()
 
-    # 3️⃣ Fix broken '{auroc_score}")' start
+    # 3️ Fix broken '{auroc_score}")' start
     if cleaned_code.startswith("{auroc_score}"):
         cleaned_code = f'print(f"AUROC: {{auroc_score}}")\n' + cleaned_code[len("{auroc_score}")+2:]
 
-    # 4️⃣ Safeguard: Add missing imports
+    # 4️ Safeguard: Add missing imports
     required_imports = [
         "import numpy as np",
         "from sklearn.metrics import roc_auc_score, average_precision_score"
@@ -403,7 +403,7 @@ def extract_python_code(response_text: str) -> str:
     if not any(line.startswith("import") or line.startswith("from") for line in cleaned_code.splitlines()):
         cleaned_code = "\n".join(required_imports) + "\n" + cleaned_code
 
-    # 5️⃣ Auto-add AUROC/AUPRC calculations if missing
+    # 5️ Auto-add AUROC/AUPRC calculations if missing
     if "auroc_score" not in cleaned_code or "auprc_score" not in cleaned_code:
         metric_code = (
             "y_test_scores = model.decision_function(X_test)\n"
@@ -414,7 +414,7 @@ def extract_python_code(response_text: str) -> str:
         )
         cleaned_code = cleaned_code + "\n\n# Added missing metrics\n" + metric_code
 
-    # 6️⃣ Ensure script starts with something valid
+    # 6️ Ensure script starts with something valid
     valid_starts = ("import ", "from ", "def ", "class ", "print(", "#")
     if not cleaned_code.startswith(valid_starts):
         cleaned_code = "# Auto-fixed script\n" + cleaned_code
